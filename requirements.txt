@@ -1,0 +1,7 @@
+flask
+nltk
+requests
+numpy
+tensorflow
+transformers
+google-cloud-bigquery
