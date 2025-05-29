@@ -1,4 +1,6 @@
-import os, re, requests
+import os
+import re
+import requests
 from datetime import datetime
 import numpy as np
 import tensorflow as tf
@@ -6,18 +8,24 @@ from transformers import TFAutoModelForSequenceClassification, AutoTokenizer
 from google.cloud import bigquery
 from nltk.corpus import stopwords
 import nltk
-nltk.download("stopwords") 
+from flask import Flask, jsonify
 
+nltk.download("stopwords")
 stop_words = set(stopwords.words("english"))
 
-API_KEY = os.getenv("878fac9d70a94e8a8f27ac7ad4151ef9")
-BQ_PROJECT = os.getenv("cloud-461215")
-BQ_DATASET = os.getenv("news_dataset")
-BQ_TABLE = os.getenv("articles")
+# Load environment variables
+API_KEY = os.getenv("NEWS_API_KEY")
+BQ_PROJECT = os.getenv("BQ_PROJECT")
+BQ_DATASET = os.getenv("BQ_DATASET")
+BQ_TABLE = os.getenv("BQ_TABLE")
 
+# Load sentiment model
 model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = TFAutoModelForSequenceClassification.from_pretrained(model_name)
+
+# Flask app
+app = Flask(__name__)
 
 def clean_text(text):
     text = re.sub(r"<.*?>", "", text)
@@ -32,7 +40,7 @@ def classify_sentiment(text):
     label = np.argmax(scores) + 1
     return "NEGATIVE" if label <= 2 else "NEUTRAL" if label == 3 else "POSITIVE"
 
-def run():
+def analyze_and_upload():
     url = f"https://newsapi.org/v2/top-headlines?country=us&category=business&language=en&apiKey={API_KEY}"
     articles = requests.get(url).json().get("articles", [])
     results = []
@@ -51,10 +59,17 @@ def run():
     client = bigquery.Client(project=BQ_PROJECT)
     table_id = f"{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE}"
     errors = client.insert_rows_json(table_id, results)
-    if errors:
-        print("Errors:", errors)
-    else:
-        print("Successfully uploaded to BigQuery")
+    return errors
+
+@app.route("/", methods=["GET"])
+def index():
+    try:
+        errors = analyze_and_upload()
+        if errors:
+            return jsonify({"status": "error", "details": errors}), 500
+        return jsonify({"status": "success", "message": "News analyzed and uploaded to BigQuery"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    run()
+    app.run(host="0.0.0.0", port=5000)
